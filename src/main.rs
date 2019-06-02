@@ -132,6 +132,7 @@ impl Runtime {
     }
 }
 
+#[naked]
 fn guard() -> ! {
     unsafe {
         let rt_ptr = RUNTIME as *mut Runtime;
