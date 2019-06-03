@@ -131,7 +131,7 @@ impl Runtime {
     }
 }
 
-#[cfg_attr(target_os="windows", naked)]
+#[cfg_attr(any(target_os="windows", target_os="linux"), naked)]
 fn guard() -> ! {
     unsafe {
         let rt_ptr = RUNTIME as *mut Runtime;
