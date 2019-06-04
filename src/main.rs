@@ -6,7 +6,7 @@ const DEFAULT_STACK_SIZE: usize = 1024 * 1024* 2;
 const MAX_THREADS: usize = 4;
 static mut RUNTIME: usize = 0;
 
-struct Runtime {
+pub struct Runtime {
     threads: Vec<Thread>,
     current: usize,
 }
@@ -49,7 +49,7 @@ impl Thread {
 }
 
 impl Runtime {
-    fn new() -> Self {
+    pub fn new() -> Self {
         let base_thread = Thread {
             id: 0,
             stack: vec![0_u8; DEFAULT_STACK_SIZE],
@@ -67,22 +67,23 @@ impl Runtime {
         }
     }
 
-    fn init(&self) {
+    pub fn init(&self) {
         unsafe {
             let r_ptr: *const Runtime = self;
             RUNTIME = r_ptr as usize;
         }
     }
 
-    fn run(&mut self) -> ! {
-        let current = self.current;
-        if current != 0 {
-            self.threads[current].state = State::Available;
-            self.t_yield();
-        }
-
+    pub fn run(&mut self) -> ! {
         while self.t_yield() {}
         std::process::exit(0);
+    }
+
+    fn t_return(&mut self) {
+        if self.current != 0 {
+            self.threads[self.current].state = State::Available;
+            self.t_yield();
+        }
     }
     
     fn t_yield(&mut self) -> bool {
@@ -112,7 +113,7 @@ impl Runtime {
         true
     }
 
-    fn spawn(&mut self, f: fn()) {
+    pub fn spawn(&mut self, f: fn()) {
         let available = self
             .threads
             .iter_mut()
@@ -132,17 +133,16 @@ impl Runtime {
 }
 
 #[cfg_attr(any(target_os="windows", target_os="linux"), naked)]
-fn guard() -> ! {
+fn guard() {
     unsafe {
         let rt_ptr = RUNTIME as *mut Runtime;
         let rt = &mut *rt_ptr;
         println!("THREAD {} FINISHED.", rt.threads[rt.current].id);
-        rt.run();
+        rt.t_return();
     };
-    
 }
 
-fn yield_thread() {
+pub fn yield_thread() {
     unsafe {
         let rt_ptr = RUNTIME as *mut Runtime;
         (*rt_ptr).t_yield();
