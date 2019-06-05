@@ -1,5 +1,6 @@
 #![feature(asm)]
 #![feature(naked_functions)]
+#![feature(futures_api)]
 use std::ptr;
 
 const DEFAULT_STACK_SIZE: usize = 1024 * 1024* 2;
@@ -197,4 +198,26 @@ fn main() {
         }
     });
     runtime.run();
+}
+
+
+use std::future::Future;
+
+use std::task::{RawWaker, RawWakerVTable, Context, Poll, Waker};
+use std::pin::Pin;
+ use std::ops::DerefMut;
+
+struct Task {
+    waker: Waker,
+}
+
+impl Future for Task {
+    type Output = ();
+    fn poll(mut self: Pin<&mut Self>, ctx: &mut Context) -> Poll<()> {
+        let s = self.deref_mut();
+        s.waker = ctx.waker().clone();
+
+        // check if task is ready
+        Poll::Ready(())
+    }
 }
