@@ -38,8 +38,7 @@ struct ThreadContext {
     r12: u64,
     rbx: u64,
     rbp: u64,
-    r_ptr: u64,
-    cur: u64,
+    thread_ptr: u64,
 }
 
 impl Thread {
@@ -123,7 +122,6 @@ impl Runtime {
     pub fn spawn<F>(&mut self, f: F)
     where F: Fn() + 'static
      {
-        let sel = self as *const Runtime as *const u64 as u64;
         let available = self
             .threads
             .iter_mut()
@@ -132,9 +130,12 @@ impl Runtime {
 
         let size = available.stack.len();
         let s_ptr = available.stack.as_mut_ptr();
+
+        // lets put our Fn() trait object on the heap and store it in our thread for now
         available.code = Box::new(f);
-        available.ctx.r_ptr = sel;
-        available.ctx.cur = available.id as u64;
+        // we need a direct reference to this thread to run the code so we need this additional
+        // context
+        available.ctx.thread_ptr = available as *const Thread as u64;
 
         unsafe {
             ptr::write(s_ptr.offset((size - 8) as isize) as *mut u64, guard as u64);
@@ -146,15 +147,9 @@ impl Runtime {
 }
 
 fn call(runtime: u64, cur: u64) {
-    dbg!(runtime);
-    dbg!(cur);
-    //let f = f as *mut *mut Fn();
-    unsafe {
-        let rt = &*(runtime as *const Runtime);
-        let thread = cur as usize;
-        let f = &rt.threads[thread].code;
+        let thread = unsafe {&*(runtime as *const Thread)};
+        let f = &thread.code;
         f();
-    };
 }
 
 #[cfg_attr(any(target_os="windows", target_os="linux"), naked)]
