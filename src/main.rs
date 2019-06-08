@@ -1,6 +1,7 @@
 #![feature(asm)]
 #![feature(naked_functions)]
 #![feature(futures_api)]
+use std::ops::Deref;
 use std::ptr;
 
 const DEFAULT_STACK_SIZE: usize = 1024 * 1024* 2;
@@ -24,6 +25,7 @@ struct Thread {
     stack: Vec<u8>,
     ctx: ThreadContext,
     state: State,
+    code: Box<Fn()>,
 }
 
 #[derive(Debug, Default)]
@@ -36,6 +38,8 @@ struct ThreadContext {
     r12: u64,
     rbx: u64,
     rbp: u64,
+    r_ptr: u64,
+    cur: u64,
 }
 
 impl Thread {
@@ -45,6 +49,7 @@ impl Thread {
             stack: vec![0_u8; DEFAULT_STACK_SIZE],
             ctx: ThreadContext::default(),
             state: State::Available,
+            code: Box::new(||{}),
         }
     }
 }
@@ -56,6 +61,7 @@ impl Runtime {
             stack: vec![0_u8; DEFAULT_STACK_SIZE],
             ctx: ThreadContext::default(),
             state: State::Running,
+            code: Box::new(||{}),
         };
 
         let mut threads = vec![base_thread];
@@ -114,7 +120,10 @@ impl Runtime {
         true
     }
 
-    pub fn spawn(&mut self, f: fn()) {
+    pub fn spawn<F>(&mut self, f: F)
+    where F: Fn() + 'static
+     {
+        let sel = self as *const Runtime as *const u64 as u64;
         let available = self
             .threads
             .iter_mut()
@@ -123,14 +132,29 @@ impl Runtime {
 
         let size = available.stack.len();
         let s_ptr = available.stack.as_mut_ptr();
+        available.code = Box::new(f);
+        available.ctx.r_ptr = sel;
+        available.ctx.cur = available.id as u64;
 
         unsafe {
             ptr::write(s_ptr.offset((size - 8) as isize) as *mut u64, guard as u64);
-            ptr::write(s_ptr.offset((size - 16) as isize) as *mut u64, f as u64);
+            ptr::write(s_ptr.offset((size - 16) as isize) as *mut u64, call as u64);
             available.ctx.rsp = s_ptr.offset((size - 16) as isize) as u64;
         }
         available.state = State::Ready;
     }
+}
+
+fn call(runtime: u64, cur: u64) {
+    dbg!(runtime);
+    dbg!(cur);
+    //let f = f as *mut *mut Fn();
+    unsafe {
+        let rt = &*(runtime as *const Runtime);
+        let thread = cur as usize;
+        let f = &rt.threads[thread].code;
+        f();
+    };
 }
 
 #[cfg_attr(any(target_os="windows", target_os="linux"), naked)]
@@ -169,6 +193,8 @@ unsafe fn switch(old: *mut ThreadContext, new: *const ThreadContext) {
         mov     0x20($1), %r12
         mov     0x28($1), %rbx
         mov     0x30($1), %rbp
+        mov     0x38($1), %rdi
+        mov     0x40($1), %rsi
         ret
         "
     : "=*m"(old)
@@ -181,9 +207,10 @@ unsafe fn switch(old: *mut ThreadContext, new: *const ThreadContext) {
 fn main() {
     let mut runtime = Runtime::new();
     runtime.init();
-    runtime.spawn(|| {
+    let s = 1;
+    runtime.spawn(move || {
         println!("THREAD 1 STARTING");
-        let id = 1;
+        let id = s;
         for i in 0..10 {
             println!("thread: {} counter: {}", id, i);
             yield_thread();
