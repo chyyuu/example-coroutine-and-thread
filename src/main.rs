@@ -170,6 +170,8 @@ pub fn yield_thread() {
 }
 
 // see: https://github.com/rust-lang/rfcs/blob/master/text/1201-naked-fns.md
+// we don't have to store the code when we switch out of the thread but we need to
+// provide a pointer to it when we switch to a thread.
 #[naked]
 unsafe fn switch(old: *mut ThreadContext, new: *const ThreadContext) {
     asm!("
@@ -189,7 +191,6 @@ unsafe fn switch(old: *mut ThreadContext, new: *const ThreadContext) {
         mov     0x28($1), %rbx
         mov     0x30($1), %rbp
         mov     0x38($1), %rdi
-        mov     0x40($1), %rsi
         ret
         "
     : "=*m"(old)
