@@ -146,8 +146,8 @@ impl Runtime {
     }
 }
 
-fn call(runtime: u64, cur: u64) {
-        let thread = unsafe {&*(runtime as *const Thread)};
+fn call(thread: u64) {
+        let thread = unsafe {&*(thread as *const Thread)};
         let f = &thread.code;
         f();
 }
@@ -228,10 +228,25 @@ use std::future::Future;
 
 use std::task::{RawWaker, RawWakerVTable, Context, Poll, Waker};
 use std::pin::Pin;
- use std::ops::DerefMut;
+use std::ops::DerefMut;
+use std::mem;
 
 struct Task {
     waker: Waker,
+}
+
+// Normally it would seem that a normal Fn would work here, problem is that Waker needs a "wake"
+// function in the vtable, and a Fn only has a "call" fn in the vtable. We need to make our own
+// Fn() "trait" that is a waker instead
+impl Task {
+    fn new<F>(waker: &dyn Fn()) -> Self 
+    {
+        let (data, vtable) = unsafe {mem::transmute::<_,(*const (), *const RawWakerVTable)>(waker)};
+        let vtable: &RawWakerVTable = unsafe{&*vtable};
+        Task {
+            waker: unsafe {Waker::from_raw(RawWaker::new(data, vtable))},
+        }
+    }
 }
 
 impl Future for Task {
