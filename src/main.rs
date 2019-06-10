@@ -55,7 +55,7 @@ impl Thread {
 
 impl Runtime {
     pub fn new() -> Self {
-        let base_thread = Thread {
+        let mut base_thread = Thread {
             id: 0,
             stack: vec![0_u8; DEFAULT_STACK_SIZE],
             ctx: ThreadContext::default(),
@@ -64,10 +64,13 @@ impl Runtime {
         };
 
         let mut threads = vec![base_thread];
+        // since we store code seperately we need to store a pointer to our base thread, it's OK to do here
+        base_thread.ctx.thread_ptr = &threads[0] as *const Thread as u64;
+
         let mut available_threads: Vec<Thread> = (1..MAX_THREADS).map(|i| Thread::new(i)).collect();
         threads.append(&mut available_threads);
 
-        Runtime {
+       Runtime {
             threads,
             current: 0,
         }
@@ -173,6 +176,7 @@ pub fn yield_thread() {
 // we don't have to store the code when we switch out of the thread but we need to
 // provide a pointer to it when we switch to a thread.
 #[naked]
+#[cfg(not(target_os="windows"))]
 unsafe fn switch(old: *mut ThreadContext, new: *const ThreadContext) {
     asm!("
         mov     %rsp, 0x00($0)
@@ -199,6 +203,37 @@ unsafe fn switch(old: *mut ThreadContext, new: *const ThreadContext) {
     : "alignstack" // needed to work on windows
     );
 }
+
+
+#[naked]
+#[cfg(target_os="windows")]
+unsafe fn switch(old: *mut ThreadContext, new: *const ThreadContext) {
+    asm!("
+        mov     %rsp, 0x00($0)
+        mov     %r15, 0x08($0)
+        mov     %r14, 0x10($0)
+        mov     %r13, 0x18($0)
+        mov     %r12, 0x20($0)
+        mov     %rbx, 0x28($0)
+        mov     %rbp, 0x30($0)
+
+        mov     0x00($1), %rsp
+        mov     0x08($1), %r15
+        mov     0x10($1), %r14
+        mov     0x18($1), %r13
+        mov     0x20($1), %r12
+        mov     0x28($1), %rbx
+        mov     0x30($1), %rbp
+        mov     0x38($1), %rcx
+        ret
+        "
+    : "=*m"(old)
+    : "r"(new)
+    :
+    : "alignstack" // needed to work on windows
+    );
+}
+
 
 fn main() {
     let mut runtime = Runtime::new();
