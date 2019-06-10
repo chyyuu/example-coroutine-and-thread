@@ -200,11 +200,12 @@ unsafe fn switch(old: *mut ThreadContext, new: *const ThreadContext) {
     : "=*m"(old)
     : "r"(new)
     :
-    : "alignstack" // needed to work on windows
+    : "alignstack" 
     );
 }
 
-
+/// Windows uses the `rcx` register for the first parameter.
+/// See: https://docs.microsoft.com/en-us/cpp/build/x64-software-conventions?view=vs-2019#register-volatility-and-preservation
 #[naked]
 #[cfg(target_os="windows")]
 unsafe fn switch(old: *mut ThreadContext, new: *const ThreadContext) {
@@ -230,7 +231,7 @@ unsafe fn switch(old: *mut ThreadContext, new: *const ThreadContext) {
     : "=*m"(old)
     : "r"(new)
     :
-    : "alignstack" // needed to work on windows
+    : "alignstack" 
     );
 }
 
