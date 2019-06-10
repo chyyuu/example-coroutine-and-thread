@@ -25,7 +25,7 @@ struct Thread {
     stack: Vec<u8>,
     ctx: ThreadContext,
     state: State,
-    code: Box<Fn()>,
+    task: Option<Box<Fn()>>,
 }
 
 #[derive(Debug, Default)]
@@ -48,7 +48,7 @@ impl Thread {
             stack: vec![0_u8; DEFAULT_STACK_SIZE],
             ctx: ThreadContext::default(),
             state: State::Available,
-            code: Box::new(||{}),
+            task: None,
         }
     }
 }
@@ -60,7 +60,7 @@ impl Runtime {
             stack: vec![0_u8; DEFAULT_STACK_SIZE],
             ctx: ThreadContext::default(),
             state: State::Running,
-            code: Box::new(||{}),
+            task: None,
         };
 
         let mut threads = vec![base_thread];
@@ -135,8 +135,8 @@ impl Runtime {
         let s_ptr = available.stack.as_mut_ptr();
 
         // lets put our Fn() trait object on the heap and store it in our thread for now
-        available.code = Box::new(f);
-        // we need a direct reference to this thread to run the code so we need this additional
+        available.task = Some(Box::new(f));
+        // we needtaskirect reference to this thread to run the code so we need this additional
         // context
         available.ctx.thread_ptr = available as *const Thread as u64;
 
@@ -151,8 +151,9 @@ impl Runtime {
 
 fn call(thread: u64) {
         let thread = unsafe {&*(thread as *const Thread)};
-        let f = &thread.code;
-        f();
+            if let Some(f) = &thread.task {
+            f();
+        }
 }
 
 #[cfg_attr(any(target_os="windows", target_os="linux"), naked)]
