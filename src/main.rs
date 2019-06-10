@@ -23,7 +23,7 @@ struct Thread {
     stack: Vec<u8>,
     ctx: ThreadContext,
     state: State,
-    task: Option<Box<dyn Fn()>>,
+    task: Option<Box<dyn Future>>,
 }
 
 #[derive(Debug, Default)]
@@ -107,6 +107,9 @@ impl Runtime {
             }
         }
 
+        // check if the task is parked, if it is then don't poll it
+        // if it's not parked then run it
+
         if self.threads[self.current].state != State::Available {
             self.threads[self.current].state = State::Ready;
         }
@@ -123,7 +126,7 @@ impl Runtime {
     }
 
     pub fn spawn<F>(&mut self, f: F)
-    where F: Fn() + 'static
+    where F: Future
      {
         let available = self
             .threads
@@ -152,7 +155,11 @@ impl Runtime {
 fn call(thread: u64) {
         let thread = unsafe {&*(thread as *const Thread)};
             if let Some(f) = &thread.task {
-            f();
+            match f.poll() {
+                Poll::Pending => // move task to pending queue preventing it from getting polled again
+                                 // give a waker to the task so it will call it when ready
+                Poll::Ready => // the future resolved successfully
+            }
         }
 }
 
@@ -176,6 +183,7 @@ pub fn yield_thread() {
 // see: https://github.com/rust-lang/rfcs/blob/master/text/1201-naked-fns.md
 // we don't have to store the code when we switch out of the thread but we need to
 // provide a pointer to it when we switch to a thread.
+// The `%rdi` register stores the first parameter to the function
 #[naked]
 #[cfg(not(target_os="windows"))]
 unsafe fn switch(old: *mut ThreadContext, new: *const ThreadContext) {
@@ -240,8 +248,9 @@ unsafe fn switch(old: *mut ThreadContext, new: *const ThreadContext) {
 fn main() {
     let mut runtime = Runtime::new();
     runtime.init();
+    // we need to simulate a reactor that drives our task forward
     let s = 1;
-    runtime.spawn(move || {
+    runtime.spawn(async move || {
         println!("THREAD 1 STARTING");
         let id = s;
         for i in 0..10 {
@@ -249,7 +258,7 @@ fn main() {
             yield_thread();
         }
     });
-    runtime.spawn(|| {
+    runtime.spawn(async || {
         println!("THREAD 2 STARTING");
         let id = 2;
         for i in 0..15 {
@@ -260,6 +269,15 @@ fn main() {
     runtime.run();
 }
 
+
+struct Reactor {
+    waker: Option<Waker>,
+}
+
+// This needs to be the main layout
+// Our "executor" needs to create a copy of a waker that it passes on to our Future
+// The future passes it on to a "reactor" that calls "wake" when it has something to offer on the
+// next pull
 
 use std::future::Future;
 
