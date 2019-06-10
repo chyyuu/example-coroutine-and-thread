@@ -1,7 +1,5 @@
 #![feature(asm)]
 #![feature(naked_functions)]
-#![feature(futures_api)]
-use std::ops::Deref;
 use std::ptr;
 
 const DEFAULT_STACK_SIZE: usize = 1024 * 1024* 2;
@@ -25,7 +23,7 @@ struct Thread {
     stack: Vec<u8>,
     ctx: ThreadContext,
     state: State,
-    task: Option<Box<Fn()>>,
+    task: Option<Box<dyn Fn()>>,
 }
 
 #[derive(Debug, Default)]
@@ -55,7 +53,7 @@ impl Thread {
 
 impl Runtime {
     pub fn new() -> Self {
-        let mut base_thread = Thread {
+        let base_thread = Thread {
             id: 0,
             stack: vec![0_u8; DEFAULT_STACK_SIZE],
             ctx: ThreadContext::default(),
@@ -65,8 +63,10 @@ impl Runtime {
 
         let mut threads = vec![base_thread];
         // since we store code seperately we need to store a pointer to our base thread, it's OK to do here
-        base_thread.ctx.thread_ptr = &threads[0] as *const Thread as u64;
+        threads[0].ctx.thread_ptr = &threads[0] as *const Thread as u64;
 
+        // we could store pointers to our threads here as well since we initialize all of them here but it's easier
+        // to follow the logic if we do it when we spawn a thread.
         let mut available_threads: Vec<Thread> = (1..MAX_THREADS).map(|i| Thread::new(i)).collect();
         threads.append(&mut available_threads);
 
