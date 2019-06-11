@@ -270,29 +270,28 @@ fn main() {
 
 use std::thread;
 use std::sync::{Arc, Mutex};
-
+use std::ops::Deref;
 use std::future::Future;
 
 use std::task::{RawWaker, RawWakerVTable, Context, Poll, Waker};
+use std::sync::atomic::AtomicBool;
 use std::pin::Pin;
 use std::ops::DerefMut;
 use std::mem;
 
 // ===== FUTURE =====
 
-struct MyFuture {
-    inner: Box<dyn Future<Output=()>>,
+struct MyFuture<'a> {
+    resource_ready: &'a AtomicBool,
 }
 
 // Normally it would seem that a normal Fn would work here, problem is that Waker needs a "wake"
 // function in the vtable, and a Fn only has a "call" fn in the vtable. We need to make our own
 // Fn() "trait" that is a waker instead
-impl MyFuture {
-    fn new<F>(inner: F) -> Self 
-    where F: Future<Output = ()>
-    {
+impl<'a> MyFuture<'a> {
+    fn new(resource_ready: &'a AtomicBool) -> Self {
         MyFuture {
-            inner: Box::new(inner),
+           resource_ready: resource_ready,
         }
         // let (data, vtable) = unsafe {mem::transmute::<_,(*const (), *const RawWakerVTable)>(waker)};
         // let vtable: &RawWakerVTable = unsafe{&*vtable};
@@ -302,15 +301,24 @@ impl MyFuture {
     }
 }
 
-impl Future for MyFuture {
-    type Output = ();
-    fn poll(mut self: Pin<&mut Self>, ctx: &mut Context) -> Poll<u32> {
-        let s = self.deref_mut();
-        s.waker = ctx.waker().clone();
 
+impl<'a> Future for MyFuture<'a> {
+    type Output = ();
+    fn poll(mut self: Pin<&mut Self>, ctx: &mut Context) -> Poll<()> {
+        let s = self.deref_mut();
+        //s.waker = ctx.waker().clone();
+        if self.deref().resource_ready {
+           Poll::Pending 
+        } else {
+            Poll::Ready(())
+        }
         // check if task is ready
-        Poll::Ready(1)
+        
     }
+}
+
+struct ResourceFuture {
+
 }
 
 
