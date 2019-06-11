@@ -1,6 +1,8 @@
 #![feature(asm)]
 #![feature(naked_functions)]
+#![feature(futures_api)]
 use std::ptr;
+use std::collections::HashSet;
 
 const DEFAULT_STACK_SIZE: usize = 1024 * 1024* 2;
 const MAX_THREADS: usize = 4;
@@ -8,8 +10,11 @@ static mut RUNTIME: usize = 0;
 
 pub struct Runtime {
     threads: Vec<Thread>,
+    incoming: HashSet<usize>,
+    pending: HashSet<usize>,
     current: usize,
 }
+
 
 #[derive(PartialEq, Eq, Debug)]
 enum State {
@@ -72,6 +77,8 @@ impl Runtime {
 
        Runtime {
             threads,
+            incoming: HashSet::new(),
+            pending: HashSet::new(),
             current: 0,
         }
     }
@@ -261,6 +268,9 @@ fn main() {
 }
 
 
+use std::thread;
+use std::sync::{Arc, Mutex};
+
 use std::future::Future;
 
 use std::task::{RawWaker, RawWakerVTable, Context, Poll, Waker};
@@ -268,26 +278,28 @@ use std::pin::Pin;
 use std::ops::DerefMut;
 use std::mem;
 
-struct Task {
+// ===== FUTURE =====
+
+struct MyFuture {
     waker: Waker,
 }
 
 // Normally it would seem that a normal Fn would work here, problem is that Waker needs a "wake"
 // function in the vtable, and a Fn only has a "call" fn in the vtable. We need to make our own
 // Fn() "trait" that is a waker instead
-impl Task {
+impl MyFuture {
     fn new<F>(waker: &dyn Fn()) -> Self 
     {
         let (data, vtable) = unsafe {mem::transmute::<_,(*const (), *const RawWakerVTable)>(waker)};
         let vtable: &RawWakerVTable = unsafe{&*vtable};
-        Task {
+        MyFuture {
             waker: unsafe {Waker::from_raw(RawWaker::new(data, vtable))},
         }
     }
 }
 
-impl Future for Task {
-    type Output = ();
+impl Future for MyFuture {
+    type Output = u32;
     fn poll(mut self: Pin<&mut Self>, ctx: &mut Context) -> Poll<()> {
         let s = self.deref_mut();
         s.waker = ctx.waker().clone();
@@ -296,3 +308,103 @@ impl Future for Task {
         Poll::Ready(())
     }
 }
+
+
+
+// ===== REACTOR =====
+// see: https://play.rust-lang.org/?version=nightly&mode=debug&edition=2018&gist=ab1d5f264e2be1e946745e982219fb2e
+
+// instead of running this on our main thread (which we could), lets make this easier to mentally
+// parse by running it on a seperate OS thread
+
+struct Reactor {
+    interested: Vec<Waker>,
+    resourcedata: Arc<Mutex<Vec<ResourceEvent>>>,
+}
+struct SomeResource {
+    counter: u32,
+    data: Arc<Mutex<Vec<ResourceEvent>>>,
+}
+
+enum ResourceEvent {
+    Got(u32),
+    Finished,
+}
+
+/// Simulates a slow resource 
+impl SomeResource {
+    fn new(data: Arc<Mutex<Vec<ResourceEvent>>>) -> Self {
+        SomeResource {
+            counter: 0,
+            data,
+        }
+    }
+    fn start(&mut self) {
+        for i in 0..10 {
+            thread::sleep(std::time::Duration::from_millis(1000));
+             self.send(i);
+            }
+            self.finish();
+        }
+        
+
+    fn send(&mut self, data: u32) {
+        if let Ok(mut r) = self.data.lock() {
+            r.push(ResourceEvent::Got(data));
+        }
+    }
+
+    fn finish(&mut self) {
+        if let Ok(mut r) = self.data.lock() {
+            r.push(ResourceEvent::Finished);
+        }
+    }
+
+}
+
+impl Reactor {
+    fn run(&self) {
+        // just spawn a resource, let's pretend we have no control over it and just forget
+        // the handle, but we know when the resource signals it's finished
+        let data = self.resourcedata.clone();
+        thread::spawn(move || {
+            let mut resource = SomeResource::new(data);
+            resource.start();
+        });
+        
+        while !self.check_status() {
+            thread::yield_now();
+            // if we push this to another thread we could just
+            // thread::sleep(std::time::Duration::from_millis(100));
+        }
+
+        self.call_wakers();
+    }
+
+    fn check_status(&self) -> bool {
+        match self.resourcedata.lock() {
+            Ok(r) => {
+                match r.last() {
+                    Some(val) => {
+                        match val {
+                            ResourceEvent::Finished => true,
+                            _ => false,
+                        }
+                    },
+                    None => false,
+                }
+            },
+            _ => false,
+        }
+}
+
+fn call_wakers(&self) {
+    for waker in self.interested {
+        waker.wake();
+    }
+}
+}
+
+
+
+
