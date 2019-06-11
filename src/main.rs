@@ -281,34 +281,37 @@ use std::mem;
 // ===== FUTURE =====
 
 struct MyFuture {
-    waker: Waker,
+    inner: Box<dyn Future<Output=()>>,
 }
 
 // Normally it would seem that a normal Fn would work here, problem is that Waker needs a "wake"
 // function in the vtable, and a Fn only has a "call" fn in the vtable. We need to make our own
 // Fn() "trait" that is a waker instead
 impl MyFuture {
-    fn new<F>(waker: &dyn Fn()) -> Self 
+    fn new<F>(inner: F) -> Self 
+    where F: Future<Output = ()>
     {
-        let (data, vtable) = unsafe {mem::transmute::<_,(*const (), *const RawWakerVTable)>(waker)};
-        let vtable: &RawWakerVTable = unsafe{&*vtable};
         MyFuture {
-            waker: unsafe {Waker::from_raw(RawWaker::new(data, vtable))},
+            inner: Box::new(inner),
         }
+        // let (data, vtable) = unsafe {mem::transmute::<_,(*const (), *const RawWakerVTable)>(waker)};
+        // let vtable: &RawWakerVTable = unsafe{&*vtable};
+        // MyFuture {
+        //     waker: unsafe {Waker::from_raw(RawWaker::new(data, vtable))},
+        // }
     }
 }
 
 impl Future for MyFuture {
-    type Output = u32;
-    fn poll(mut self: Pin<&mut Self>, ctx: &mut Context) -> Poll<()> {
+    type Output = ();
+    fn poll(mut self: Pin<&mut Self>, ctx: &mut Context) -> Poll<u32> {
         let s = self.deref_mut();
         s.waker = ctx.waker().clone();
 
         // check if task is ready
-        Poll::Ready(())
+        Poll::Ready(1)
     }
 }
-
 
 
 // ===== REACTOR =====
@@ -363,6 +366,12 @@ impl SomeResource {
 }
 
 impl Reactor {
+    fn new() -> Self {
+        Reactor {
+            interested: vec![],
+            resourcedata: Arc::new(Mutex::new(vec![])),
+        }
+    }
     fn run(&self) {
         // just spawn a resource, let's pretend we have no control over it and just forget
         // the handle, but we know when the resource signals it's finished
@@ -371,10 +380,11 @@ impl Reactor {
             let mut resource = SomeResource::new(data);
             resource.start();
         });
-        
+
+
         while !self.check_status() {
             thread::yield_now();
-            // if we push this to another thread we could just
+            // if we push this reactor to another thread we could just
             // thread::sleep(std::time::Duration::from_millis(100));
         }
 
