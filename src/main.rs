@@ -1,6 +1,8 @@
 #![feature(asm)]
 #![feature(naked_functions)]
+#![feature(futures_api)]
 use std::ptr;
+use std::collections::HashSet;
 
 const DEFAULT_STACK_SIZE: usize = 1024 * 1024* 2;
 const MAX_THREADS: usize = 4;
@@ -8,8 +10,11 @@ static mut RUNTIME: usize = 0;
 
 pub struct Runtime {
     threads: Vec<Thread>,
+    incoming: HashSet<usize>,
+    pending: HashSet<usize>,
     current: usize,
 }
+
 
 #[derive(PartialEq, Eq, Debug)]
 enum State {
@@ -23,7 +28,7 @@ struct Thread {
     stack: Vec<u8>,
     ctx: ThreadContext,
     state: State,
-    task: Option<Box<dyn Future>>,
+    task: Option<Box<dyn Future<Output = ()>>>,
 }
 
 #[derive(Debug, Default)]
@@ -72,6 +77,8 @@ impl Runtime {
 
        Runtime {
             threads,
+            incoming: HashSet::new(),
+            pending: HashSet::new(),
             current: 0,
         }
     }
@@ -270,47 +277,162 @@ fn main() {
 }
 
 
-struct Reactor {
-    waker: Option<Waker>,
-}
-
-// This needs to be the main layout
-// Our "executor" needs to create a copy of a waker that it passes on to our Future
-// The future passes it on to a "reactor" that calls "wake" when it has something to offer on the
-// next pull
-
+use std::thread;
+use std::sync::{Arc, Mutex};
+use std::ops::Deref;
 use std::future::Future;
 
 use std::task::{RawWaker, RawWakerVTable, Context, Poll, Waker};
+use std::sync::atomic::{AtomicBool,Ordering};
 use std::pin::Pin;
 use std::ops::DerefMut;
 use std::mem;
 
-struct Task {
-    waker: Waker,
+// ===== FUTURE =====
+
+struct MyFuture<'a> {
+    resource_ready: &'a AtomicBool,
 }
 
 // Normally it would seem that a normal Fn would work here, problem is that Waker needs a "wake"
 // function in the vtable, and a Fn only has a "call" fn in the vtable. We need to make our own
 // Fn() "trait" that is a waker instead
-impl Task {
-    fn new<F>(waker: &dyn Fn()) -> Self 
-    {
-        let (data, vtable) = unsafe {mem::transmute::<_,(*const (), *const RawWakerVTable)>(waker)};
-        let vtable: &RawWakerVTable = unsafe{&*vtable};
-        Task {
-            waker: unsafe {Waker::from_raw(RawWaker::new(data, vtable))},
+impl<'a> MyFuture<'a> {
+    fn new(resource_ready: &'a AtomicBool) -> Self {
+        MyFuture {
+           resource_ready,
         }
+        // let (data, vtable) = unsafe {mem::transmute::<_,(*const (), *const RawWakerVTable)>(waker)};
+        // let vtable: &RawWakerVTable = unsafe{&*vtable};
+        // MyFuture {
+        //     waker: unsafe {Waker::from_raw(RawWaker::new(data, vtable))},
+        // }
     }
 }
 
-impl Future for Task {
+
+impl<'a> Future for MyFuture<'a> {
     type Output = ();
     fn poll(mut self: Pin<&mut Self>, ctx: &mut Context) -> Poll<()> {
         let s = self.deref_mut();
-        s.waker = ctx.waker().clone();
-
+        //s.waker = ctx.waker().clone();
+        if self.resource_ready.load(Ordering::Relaxed) {
+           Poll::Pending 
+        } else {
+            Poll::Ready(())
+        }
         // check if task is ready
-        Poll::Ready(())
+        
     }
 }
+
+
+
+// ===== REACTOR =====
+// see: https://play.rust-lang.org/?version=nightly&mode=debug&edition=2018&gist=ab1d5f264e2be1e946745e982219fb2e
+
+// instead of running this on our main thread (which we could), lets make this easier to mentally
+// parse by running it on a seperate OS thread
+
+struct Reactor {
+    interested: Vec<Waker>,
+    resourcedata: Arc<Mutex<Vec<ResourceEvent>>>,
+    resource_ready: AtomicBool,
+}
+struct SomeResource {
+    counter: u32,
+    data: Arc<Mutex<Vec<ResourceEvent>>>,
+}
+
+enum ResourceEvent {
+    Got(u32),
+    Finished,
+}
+
+/// Simulates a slow resource 
+impl SomeResource {
+    fn new(data: Arc<Mutex<Vec<ResourceEvent>>>) -> Self {
+        SomeResource {
+            counter: 0,
+            data,
+            resource_ready: AtomicBool::new(false),
+        }
+    }
+    fn start(&mut self) {
+        for i in 0..10 {
+            thread::sleep(std::time::Duration::from_millis(1000));
+             self.send(i);
+            }
+            self.finish();
+        }
+        
+
+    fn send(&mut self, data: u32) {
+        if let Ok(mut r) = self.data.lock() {
+            r.push(ResourceEvent::Got(data));
+        }
+    }
+
+    fn finish(&mut self) {
+        if let Ok(mut r) = self.data.lock() {
+            r.push(ResourceEvent::Finished);
+        }
+    }
+
+}
+
+impl Reactor {
+    fn new() -> Self {
+        Reactor {
+            interested: vec![],
+            resourcedata: Arc::new(Mutex::new(vec![])),
+        }
+    }
+    fn run(&self) {
+        // just spawn a resource, let's pretend we have no control over it and just forget
+        // the handle, but we know when the resource signals it's finished
+        self.resource_ready = AtomicBool::new(false);
+        let data = self.resourcedata.clone();
+        thread::spawn(move || {
+            let mut resource = SomeResource::new(data);
+            resource.start();
+        });
+
+
+        while !self.check_status() {
+            thread::yield_now();
+            // if we push this reactor to another thread we could just
+            // thread::sleep(std::time::Duration::from_millis(100));
+        }
+
+        self.resource_ready = AtomicBool::new(true);
+        self.call_wakers();
+    }
+
+    fn check_status(&self) -> bool {
+        match self.resourcedata.lock() {
+            Ok(r) => {
+                match r.last() {
+                    Some(val) => {
+                        match val {
+                            ResourceEvent::Finished => true,
+                            _ => false,
+                        }
+                    },
+                    None => false,
+                }
+            },
+            _ => false,
+        }
+}
+
+fn call_wakers(&self) {
+    for waker in self.interested {
+        waker.wake();
+    }
+}
+}
+
+
+
+
