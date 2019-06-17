@@ -288,15 +288,43 @@ use std::pin::Pin;
 use std::ops::DerefMut;
 use std::mem;
 
+
+// ===== GENERAL STRUCTURE =====
+// Executor hands out a clone of a waker that is passed to the reactor (via one or more futures)
+// The waker is cloned from the Context that the future gets when polled by an executor
+// The reaactor has the responsibility to check the status of the blocking operation, returning a Poll to
+// the future that passes it on (?) to the executor. Once a Poll::Pending is recieved the future is not polled again until:
+//
+// The reactor calls Waker.wake() which signals to the executor that the future is ready to be polled again **presumably**
+// returning a value.
+//
+// Questions that must be answered:
+// - How does the wake() method communicate with the exetutor? Do we need two ques, one with `incoming` futures that are ready
+// to be polled, and one queue with `parked/sleeping` futures that are waiting to we woken? Wake then just shifts a `task` from
+// `sleeping` to `incoming`?
+//
+//- How do we releate this to Pin<Self> and self referential structs in a way that's easy to understand?
+//
+// - Should we make two futures and chain them or should we be satisfied with one for a good enough example? Maybe chain on one operation
+// just so we se som "user" input in the code
+//
+// - How will we run the Reactor? The IO operation is already "faked" out in the suggestion below, but in this 1 thread scenario
+// should the reactor be ran on the same thread as the executor? Will that be confusing/hard to implement? The only way this will work
+// is if we have a sceduler running both the reactor and the executor, or run the executor as a part of the reactor - that will
+// be very confusing since the whole point of the Reactor-Executor pattern is to allow for them to be seperated.
+
+// ===== EXECUTOR =====
+// Our main example above will be the executor, instead of running functions we will pass it futures that it will run, and 
+// just change the `call` method to work on futures inestad of `Fn()` traits. Needs to be able to `sleep` until woken
+
+
 // ===== FUTURE =====
 
 struct MyFuture<'a> {
     resource_ready: &'a AtomicBool,
 }
 
-// Normally it would seem that a normal Fn would work here, problem is that Waker needs a "wake"
-// function in the vtable, and a Fn only has a "call" fn in the vtable. We need to make our own
-// Fn() "trait" that is a waker instead
+
 impl<'a> MyFuture<'a> {
     fn new(resource_ready: &'a AtomicBool) -> Self {
         MyFuture {
