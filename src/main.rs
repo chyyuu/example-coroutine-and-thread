@@ -1,6 +1,6 @@
 #![feature(asm)]
 #![feature(naked_functions)]
-#![feature(futures_api)]
+#![feature(async_await)]
 use std::ptr;
 use std::collections::HashSet;
 
@@ -253,27 +253,26 @@ unsafe fn switch(old: *mut ThreadContext, new: *const ThreadContext) {
 
 
 fn main() {
-    let mut runtime = Runtime::new();
-    runtime.init();
+    let mut executor = Runtime::new();
+    executor.init();
+    let db = DbReactor::new();
+    let act_users_fut = db.query("SELECT SUM(t1.is_active) FROM users t1 GROUP BY t1.is_active");
+    let tot_users_fut = db.query("SELECT COUNT(t1.id) FROM users t1 GROUP BY t1.id");
     // we need to simulate a reactor that drives our task forward
     let s = 1;
-    runtime.spawn(async move || {
-        println!("THREAD 1 STARTING");
-        let id = s;
-        for i in 0..10 {
-            println!("thread: {} counter: {}", id, i);
-            yield_thread();
-        }
+    let act_users = executor.scedule(async || {
+        let result  = act_users_fut.await?;
+        println!("Active users: {}", result);
+        result
     });
-    runtime.spawn(async || {
-        println!("THREAD 2 STARTING");
-        let id = 2;
-        for i in 0..15 {
-            println!("thread: {} counter: {}", id, i);
-            yield_thread();
-        }
+    let tot_users = executor.scedule(async || {
+        let result = tot_users_fut.await?;
+        println!("Total users: {}", result);
+        result
     });
-    runtime.run();
+
+    executor.run();
+    println!("We have {} % active users", (act_users as f64 / tot_users as f64) * 100);
 }
 
 
@@ -313,10 +312,42 @@ use std::mem;
 // is if we have a sceduler running both the reactor and the executor, or run the executor as a part of the reactor - that will
 // be very confusing since the whole point of the Reactor-Executor pattern is to allow for them to be seperated.
 
+// References:
+// https://levelup.gitconnected.com/explained-how-does-async-work-in-rust-c406f411b2e2
+// https://tokio.rs/docs/internals/runtime-model/
+
 // ===== EXECUTOR =====
 // Our main example above will be the executor, instead of running functions we will pass it futures that it will run, and 
 // just change the `call` method to work on futures inestad of `Fn()` traits. Needs to be able to `sleep` until woken
 
+// 1. An executor is more or less like one of our threads.
+// 2. A task implements Future
+// 3. A task is spawned on our thread, and typically stored on the heap Box<Task>, Arc<Task>
+// 4. Executor then calls `poll_future_notify` which ensures that the task context is set to the
+// **thread local variable** so **task::current()** is able to read it. NB!NB! fut 3.0 already implements this.
+// 5. It also passes in a notify handle (i.e. the Waker). All of this is provided by the task::current
+// and thats how it is linked to the executor.
+// 6. when notify is called it's like this. Notify::notify(thread_id/task_id) => Waker::wake() -> aredy contains this info?
+// 7. The waker.wake() method is responsible for performing the scheduling logic??
+
+// On 7. The waker.wake() could be like our `yield` function in that it `yields` the current thread,
+// sets the waker.wake(thread_id) -> thread_id to `Ready` and then passes on to the scheduler (round-robin)
+
+// ----- FROM TOKIO DOCS -----
+// reference: https://tokio.rs/docs/internals/runtime-model/
+// One strategy for implementing an executor is to store each task in a Box and to use a linked list 
+// to track tasks that are scheduled for execution. When Notify::notify is called, then the task 
+// associated with the identifier is pushed at the end of the scheduled linked list. When the executor 
+// runs, it pops from the front of the linked list and executes the task as described above.
+
+// Note that this section does not describe how the executor is run. The details of this are left to 
+// the executor implementation. One option is for the executor to spawn one or more threads and 
+// dedicate these threads to draining the scheduled linked list. Another is to provide a 
+// MyExecutor::run function that blocks the current thread and drains the scheduled linked list.
+
+// We'll stay away from linked list, but use a VecDeque instead, or just a Vec to keep it very simple
+// We'll do the first implementation, using our thread implementation to drain the scheduled tasks
+// since we already have many of the missing pieces in place.
 
 // ===== FUTURE =====
 
@@ -362,68 +393,30 @@ impl<'a> Future for MyFuture<'a> {
 // instead of running this on our main thread (which we could), lets make this easier to mentally
 // parse by running it on a seperate OS thread
 
-struct Reactor {
+struct DbReactor {
     interested: Vec<Waker>,
-    resourcedata: Arc<Mutex<Vec<ResourceEvent>>>,
-    resource_ready: AtomicBool,
-}
-struct SomeResource {
-    counter: u32,
-    data: Arc<Mutex<Vec<ResourceEvent>>>,
+    resourcehandles: Vec<Arc<Mutex<ResourceHandle>>>,
 }
 
-enum ResourceEvent {
-    Got(u32),
-    Finished,
-}
-
-/// Simulates a slow resource 
-impl SomeResource {
-    fn new(data: Arc<Mutex<Vec<ResourceEvent>>>) -> Self {
-        SomeResource {
-            counter: 0,
-            data,
-            resource_ready: AtomicBool::new(false),
-        }
-    }
-    fn start(&mut self) {
-        for i in 0..10 {
-            thread::sleep(std::time::Duration::from_millis(1000));
-             self.send(i);
-            }
-            self.finish();
-        }
-        
-
-    fn send(&mut self, data: u32) {
-        if let Ok(mut r) = self.data.lock() {
-            r.push(ResourceEvent::Got(data));
-        }
-    }
-
-    fn finish(&mut self) {
-        if let Ok(mut r) = self.data.lock() {
-            r.push(ResourceEvent::Finished);
-        }
-    }
-
-}
-
-impl Reactor {
-    fn new() -> Self {
-        Reactor {
+impl DbReactor {
+    pub fn new() -> Self {    
+        DbReactor {
             interested: vec![],
-            resourcedata: Arc::new(Mutex::new(vec![])),
+            resourcehandles: vec![],
         }
     }
-    fn run(&self) {
+    fn query(&self, qry: &str) {
         // just spawn a resource, let's pretend we have no control over it and just forget
-        // the handle, but we know when the resource signals it's finished
-        self.resource_ready = AtomicBool::new(false);
-        let data = self.resourcedata.clone();
+        // the thread handle, in a real world we would not get a handle to some external resource
+        // but we will get a signal that it's finished
+
+        // Instead we create our own handle. We give a fixed Id now
+        let handle = ResourceHandle::new(self.resourcehandles.len());
+        self.resourcehandles.push(Arc::new(Mutex::new(handle)));
+        let handle = self.resourcehandles.last().unwrap().clone();
         thread::spawn(move || {
-            let mut resource = SomeResource::new(data);
-            resource.start();
+            let mut resource = SomeDatabase::new(handle);
+            resource.query(qry.to_string());
         });
 
 
@@ -461,6 +454,64 @@ fn call_wakers(&self) {
 }
 }
 
+struct ResourceHandle {
+    id: usize,
+    finished: bool,
+}
+
+impl ResourceHandle {
+    fn new(id: usize) -> Self {
+        ResourceHandle {
+            id,
+            finished: false,
+        }
+    }
+}
 
 
+struct SomeDatabase {
+    counter: u32,
+    handle: Arc<Mutex<ResourceHandle>>,
+}
+
+enum ResourceEvent {
+    Got(u32),
+    Finished,
+}
+
+/// Simulates a database, this is really not any code we need - but we just want to fake a
+/// database.
+impl SomeDatabase {
+    fn new(handle: Arc<Mutex<ResourceHandle>>) -> Self {
+        SomeDatabase {
+            counter: 0,
+            handle,
+        }
+    }
+    fn query(&mut self, qry: String) {
+        // just pretend we actually issue a real query
+        let result = if qry.contains("SUM") {
+            5
+        } else {
+            10
+        };
+        thread::sleep(std::time::Duration::from_millis(1000));
+        self.send(i);
+        self.finish();
+    }
+        
+
+    fn send(&mut self, data: u32) {
+        if let Ok(mut r) = self.data.lock() {
+            r.push(ResourceEvent::Got(data));
+        }
+    }
+
+    fn finish(&mut self) {
+        if let Ok(mut r) = self.data.lock() {
+            r.push(ResourceEvent::Finished);
+        }
+    }
+
+}
 
