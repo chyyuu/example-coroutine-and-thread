@@ -124,15 +124,15 @@ impl Runtime {
         let s_ptr = available.stack.as_mut_ptr();
 
         unsafe {
-            ptr::write(s_ptr.offset((size - 8) as isize) as *mut u64, guard as u64);
-            ptr::write(s_ptr.offset((size - 16) as isize) as *mut u64, f as u64);
-            available.ctx.rsp = s_ptr.offset((size - 16) as isize) as u64;
+            ptr::write(s_ptr.offset((size - 24) as isize) as *mut u64, guard as u64);
+            ptr::write(s_ptr.offset((size - 32) as isize) as *mut u64, f as u64);
+            available.ctx.rsp = s_ptr.offset((size - 32) as isize) as u64;
         }
         available.state = State::Ready;
     }
 }
 
-#[cfg_attr(any(target_os="windows", target_os="linux"), naked)]
+#[cfg_attr(target_os="windows", naked)]
 fn guard() {
     unsafe {
         let rt_ptr = RUNTIME as *mut Runtime;
