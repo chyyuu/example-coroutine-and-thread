@@ -109,7 +109,7 @@ impl Runtime {
         unsafe {
             switch(&mut self.threads[old_pos].ctx, &self.threads[pos].ctx);
         }
-        
+
         self.threads.len() > 0
     }
 
