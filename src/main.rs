@@ -149,7 +149,6 @@ pub fn yield_thread() {
     };
 }
 
-// see: https://github.com/rust-lang/rfcs/blob/master/text/1201-naked-fns.md
 #[naked]
 #[inline(never)]
 unsafe fn switch(old: *mut ThreadContext, new: *const ThreadContext) {
@@ -169,7 +168,6 @@ unsafe fn switch(old: *mut ThreadContext, new: *const ThreadContext) {
         mov     0x20($1), %r12
         mov     0x28($1), %rbx
         mov     0x30($1), %rbp
-
         ret
         "
     :
