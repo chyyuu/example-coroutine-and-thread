@@ -2,7 +2,7 @@
 #![feature(naked_functions)]
 use std::ptr;
 
-const DEFAULT_STACK_SIZE: usize = 1024 * 1024;
+const DEFAULT_STACK_SIZE: usize = 1024 * 1024 * 2;
 const MAX_THREADS: usize = 4;
 static mut RUNTIME: usize = 0;
 
@@ -136,9 +136,7 @@ impl Runtime {
 fn guard() {
     unsafe {
         let rt_ptr = RUNTIME as *mut Runtime;
-        let rt = &mut *rt_ptr;
-        println!("THREAD {} FINISHED.", rt.threads[rt.current].id);
-        rt.t_return();
+        (*rt_ptr).t_return();
     };
 }
 
@@ -187,6 +185,7 @@ fn main() {
             println!("thread: {} counter: {}", id, i);
             yield_thread();
         }
+        println!("THREAD 1 FINISHED");
     });
     runtime.spawn(|| {
         println!("THREAD 2 STARTING");
@@ -195,6 +194,7 @@ fn main() {
             println!("thread: {} counter: {}", id, i);
             yield_thread();
         }
+        println!("THREAD 2 FINISHED");
     });
     runtime.run();
 }
