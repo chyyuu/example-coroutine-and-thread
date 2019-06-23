@@ -19,8 +19,7 @@ Futures 3.0 and Rusts async/await syntax.
 The main idea is that Reading these two books will give most people a pretty deep understanding of async code and how Futures work once finished and
 thereby bride a gap between the documentation that is certainly going to come from the Rust docs team and in libraries like `Tokio` and use an example driven
 approach to learning the basics pretty much from the ground up. I will not be focusing too much on how exactly `tokio`, `romio` or `mio` works since they are good
-implementations that carry a large amount of complexity in themselves. This will be a bad implementation (as far as production quality goes), 
-but a working example focusing on code that is simple to understand and on what's happening under the hood.
+implementations that carry a large amount of complexity in themselves.
 
 The threading implementation used in the first book will probably be changed slightly to serve as an `exeutor` and instead of just spawning
 `fn()` or `trait objects` we spawn futures.
