@@ -23,3 +23,10 @@ implementations that carry a large amount of complexity in themselves.
 
 The threading implementation used in the first book will probably be changed slightly to serve as an `exeutor` and instead of just spawning
 `fn()` or `trait objects` we spawn futures.
+
+## Changelog
+2019-06-26: The Supporting Windows appendix treated the XMMfields as 64 bits, but they are 128 bits which was an oversight on my part. Correcting this added some interesting material to that chapter but unfortunately also some complexity. However, it's now corrected and explained in both the book and repo. It now only slightly deviates from the [Boost Context library implementation](https://github.com/boostorg/context/blob/develop/src/asm/ontop_x86_64_ms_pe_gas.asm) which I consider one of the better implementations out there.
+
+2019-06-21: Rather substantial change and cleanup. An issue was reported that Valgrind reported some troubles with the code and crashed. This is now fixed and there are currently no unsolved issues. In addition, the code now runs on both debugand releasebuilds without any issues on all platforms. Thanks to everyone for reporting issues they found.
+
+2019-06-18: New chapter implementing a proper Windows support
