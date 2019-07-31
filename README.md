@@ -24,3 +24,21 @@ but a working example focusing on code that is simple to understand and on what'
 
 The threading implementation used in the first book will probably be changed slightly to serve as an `exeutor` and instead of just spawning
 `fn()` or `trait objects` we spawn futures.
+
+## Update 2019-07-31
+I decided to divide this deep dive into asynchronous code into three books.
+
+1. Green Threads
+
+Learn about the way of doing multitasking that GO, Ruby and many other programs use. It also explains a lot about some OS basics since threads and context switching is an important part of how operating systems manage to multitask. We explore this by creating our own green threads implementation.
+
+2. Learn Async programming
+
+This book is about two other ways of performing async execution. Threadpools and epoll/kqueue/IOCP - we explore this by implementing a very simplified version of Nodes event loop. It's an interesting example since it uses both ways of running code asyncrhonously. This book will in some sort be higher level than green threads, but will talk much more about working together with the operating system to run async code effectively.
+
+I'm working on the book right now so if you want to follow along and/or give feedback you can have a look here: https://cfsamson-1.gitbook.io/async-basics-explained-with-rust/
+
+3. Futures in Rust
+
+Ok, so the previous two books set up all we needed to know of basic information to get a good understanding of Rusts futures. I'll try to explain them by implementing a very simplified version of the whole stack: libc, mio (reactor) and an executor runtime (tokio). We'll talk about the design of futures, how they work and why they work the way they do. Since we covered so much in the previous two books, this one will be more Rust Centric and focused on Futures since we already have most of the Async basics we need covered. Work on this book has not really started yet.
+
