@@ -28,13 +28,33 @@ struct Thread {
 #[derive(Debug, Default)]
 #[repr(C)]
 struct ThreadContext {
-    rsp: u64,
-    r15: u64,
-    r14: u64,
-    r13: u64,
-    r12: u64,
-    rbx: u64,
-    rbp: u64,
+    x1:  u64,
+    x2:  u64,
+    x8:  u64,
+    x9:  u64,
+    x18: u64,
+    x19: u64,
+    x20: u64,
+    x21: u64,
+    x22: u64,
+    x23: u64,
+    x24: u64,
+    x25: u64,
+    x26: u64,
+    x27: u64,
+    f8:  u32,
+    f9:  u32,
+    f18: u32,
+    f19: u32,
+    f20: u32,
+    f21: u32,
+    f22: u32,
+    f23: u32,
+    f24: u32,
+    f25: u32,
+    f26: u32,
+    f27: u32,
+    nx1: u64,
 }
 
 impl Thread {
@@ -124,9 +144,18 @@ impl Runtime {
         unsafe {
             let s_ptr = available.stack.as_mut_ptr().offset(size as isize);
             let s_ptr = (s_ptr as usize & !15) as *mut u8;
-            ptr::write(s_ptr.offset(-24) as *mut u64, guard as u64);
-            ptr::write(s_ptr.offset(-32) as *mut u64, f as u64);
-            available.ctx.rsp = s_ptr.offset(-32) as u64;
+            //ptr::write(s_ptr.offset(-24) as *mut u64, guard as u64);
+            //ptr::write(s_ptr.offset(-32) as *mut u64, f as u64);
+            //available.ctx.rsp = s_ptr.offset(-32) as u64;
+
+            //ptr::write(s_ptr.ctx.x1 as *mut u64, guard as u64);
+            //ptr::write(s_ptr.ctx.nx1 as *mut u64, f as u64);
+            available.ctx.x1 = guard as u64;
+            available.ctx.nx1 = f as u64;
+            available.ctx.x2 = s_ptr.offset(-32) as u64;
+            //this->coroutines[pos]->ctx.x1 = (std::uint64_t)(void*)guard;
+            //this->coroutines[pos]->ctx.jump_to = (std::uint64_t)(void*)f;
+            //this->coroutines[pos]->ctx.x2 = (std::uint64_t)(void*)(s_ptr - 32);
         }
         available.state = State::Ready;
     }
@@ -150,23 +179,64 @@ pub fn yield_thread() {
 #[inline(never)]
 unsafe fn switch(old: *mut ThreadContext, new: *const ThreadContext) {
     asm!("
-        mov     %rsp, 0x00($0)
-        mov     %r15, 0x08($0)
-        mov     %r14, 0x10($0)
-        mov     %r13, 0x18($0)
-        mov     %r12, 0x20($0)
-        mov     %rbx, 0x28($0)
-        mov     %rbp, 0x30($0)
-   
-        mov     0x00($1), %rsp
-        mov     0x08($1), %r15
-        mov     0x10($1), %r14
-        mov     0x18($1), %r13
-        mov     0x20($1), %r12
-        mov     0x28($1), %rbx
-        mov     0x30($1), %rbp
-        ret
-        "
+        sd x1, 0x00($0)
+        sd x2, 0x08($0)
+        sd x8, 0x10($0)
+        sd x9, 0x18($0)
+        sd x18, 0x20($0)
+        sd x19, 0x28($0)
+        sd x20, 0x30($0)
+        sd x21, 0x38($0)
+        sd x22, 0x40($0)
+        sd x23, 0x48($0)
+        sd x24, 0x50($0)
+        sd x25, 0x58($0)
+        sd x26, 0x60($0)
+        sd x27, 0x68($0)
+        fsw f8, 0x70($0)
+        fsw f9, 0x74($0)
+        fsw f18, 0x78($0)
+        fsw f19, 0x7c($0)
+        fsw f20, 0x80($0)
+        fsw f21, 0x84($0)
+        fsw f22, 0x88($0)
+        fsw f23, 0x8c($0)
+        fsw f24, 0x90($0)
+        fsw f25, 0x94($0)
+        fsw f26, 0x98($0)
+        fsw f27, 0x9c($0)
+        sd x1, 0xa0($0)
+
+        ld x1, 0x00($1)
+        ld x2, 0x08($1)
+        ld x8, 0x10($1)
+        ld x9, 0x18($1)
+        ld x18, 0x20($1)
+        ld x19, 0x28($1)
+        ld x20, 0x30($1)
+        ld x21, 0x38($1)
+        ld x22, 0x40($1)
+        ld x23, 0x48($1)
+        ld x24, 0x50($1)
+        ld x25, 0x58($1)
+        ld x26, 0x60($1)
+        ld x27, 0x68($1)
+        flw f8, 0x70($1)
+        flw f9, 0x74($1)
+        flw f18, 0x78($1)
+        flw f19, 0x7c($1)
+        flw f20, 0x80($1)
+        flw f21, 0x84($1)
+        flw f22, 0x88($1)
+        flw f23, 0x8c($1)
+        flw f24, 0x90($1)
+        flw f25, 0x94($1)
+        flw f26, 0x98($1)
+        flw f27, 0x9c($1)
+        ld t0, 0xa0($1)
+
+        jr t0
+    "
     :
     :"r"(old), "r"(new)
     :
