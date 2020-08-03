@@ -1,6 +1,4 @@
-#![feature(llvm_asm)]
-#![feature(naked_functions)]
-use std::ptr;
+#![feature(llvm_asm, naked_functions)]
 
 const DEFAULT_STACK_SIZE: usize = 1024 * 1024 * 2;
 const MAX_THREADS: usize = 4;
@@ -124,13 +122,17 @@ impl Runtime {
         unsafe {
             let s_ptr = available.stack.as_mut_ptr().offset(size as isize);
             let s_ptr = (s_ptr as usize & !15) as *mut u8;
-            ptr::write(s_ptr.offset(-24) as *mut u64, guard as u64);
-            ptr::write(s_ptr.offset(-32) as *mut u64, f as u64);
+            std::ptr::write(s_ptr.offset(-16) as *mut u64, guard as u64);
+            std::ptr::write(s_ptr.offset(-24) as *mut u64, skip as u64);
+            std::ptr::write(s_ptr.offset(-32) as *mut u64, f as u64);
             available.ctx.rsp = s_ptr.offset(-32) as u64;
         }
         available.state = State::Ready;
     }
 }
+
+#[naked]
+fn skip() { }
 
 fn guard() {
     unsafe {
@@ -173,7 +175,6 @@ unsafe fn switch(old: *mut ThreadContext, new: *const ThreadContext) {
     : "volatile", "alignstack"
     );
 }
-
 fn main() {
     let mut runtime = Runtime::new();
     runtime.init();
