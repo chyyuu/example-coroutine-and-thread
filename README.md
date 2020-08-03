@@ -42,6 +42,10 @@ I'm working on the book right now so if you want to follow along and/or give fee
 Ok, so the previous two books set up all we needed to know of basic information to get a good understanding of Rusts futures. I'll try to explain them by implementing a very simplified version of the whole stack: libc, mio (reactor) and an executor runtime (tokio). We'll talk about the design of futures, how they work and why they work the way they do. Since we covered so much in the previous two books, this one will be more Rust Centric and focused on Futures since we already have most of the Async basics we need covered. Work on this book has not really started yet.
 
 ## Changelog
+**2020-08-04** Thanks to [ziyi-yan](https://github.com/ziyi-yan) which identified an issue with the `guard` function not
+being 16-byte aligned the example is now correct and can be used as a basis for more advanced experimentation. See #19 for
+more details.
+
 **2019-22-12:** Added one line of code to make sure the memory we get from the allocator is 16 byte aligned. Refactored to use the "high" memory
 address as basis for offsets when writing to the stack since this made alignment easier. See Issue #12 for more information.
 
