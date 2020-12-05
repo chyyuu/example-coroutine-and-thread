@@ -44,7 +44,11 @@ Ok, so the previous two books set up all we needed to know of basic information 
 ## Changelog
 **2020-12-06:** Nightly compilers after 2020-08-23 fails to compile naked functions that accept formal arguments on Windows. On most recent nightly compilers this turns in to a hard error on Linux as well since passing arguments to naked functions is not supported. See #20 for more information. I changed `switch` to not accept arguments and pass them insted by explicitly passing them in registers using assembly according to the calling convention on Linux/Windows.
 
-**2019-12-22:** Added one line of code to make sure the memory we get from the allocator is 16 byte aligned. Refactored to use the "high" memory
+**2020-08-04** Thanks to [ziyi-yan](https://github.com/ziyi-yan) which identified an issue with the `guard` function not
+being 16-byte aligned the example is now correct and can be used as a basis for more advanced experimentation. See #19 for
+more details.
+
+**2019-22-12:** Added one line of code to make sure the memory we get from the allocator is 16 byte aligned. Refactored to use the "high" memory
 address as basis for offsets when writing to the stack since this made alignment easier. See Issue #12 for more information.
 
 **2019-06-26:** The Supporting Windows appendix treated the XMM fields as 64 bits, but they are 128 bits which was an oversight on my part. Correcting this added some interesting material to that chapter but unfortunately also some complexity. However, it's now corrected and explained in both the book and repo. It now only slightly deviates from the [Boost Context library implementation](https://github.com/boostorg/context/blob/develop/src/asm/ontop_x86_64_ms_pe_gas.asm) which I consider one of the better implementations out there.
