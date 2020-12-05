@@ -105,9 +105,14 @@ impl Runtime {
         self.current = pos;
 
         unsafe {
-            switch(&mut self.threads[old_pos].ctx, &self.threads[pos].ctx);
+            let old: *mut ThreadContext = &mut self.threads[old_pos].ctx;
+            let new: *const ThreadContext = &self.threads[pos].ctx;
+            llvm_asm!(
+                "mov $0, %rdi
+                 mov $1, %rsi
+                 call switch" ::"r"(old), "r"(new)
+            );
         }
-
         self.threads.len() > 0
     }
 
@@ -149,30 +154,26 @@ pub fn yield_thread() {
 }
 
 #[naked]
+#[no_mangle]
 #[inline(never)]
-unsafe fn switch(old: *mut ThreadContext, new: *const ThreadContext) {
+unsafe fn switch() {
     llvm_asm!("
-        mov     %rsp, 0x00($0)
-        mov     %r15, 0x08($0)
-        mov     %r14, 0x10($0)
-        mov     %r13, 0x18($0)
-        mov     %r12, 0x20($0)
-        mov     %rbx, 0x28($0)
-        mov     %rbp, 0x30($0)
-   
-        mov     0x00($1), %rsp
-        mov     0x08($1), %r15
-        mov     0x10($1), %r14
-        mov     0x18($1), %r13
-        mov     0x20($1), %r12
-        mov     0x28($1), %rbx
-        mov     0x30($1), %rbp
-        ret
+        mov     %rsp, 0x00(%rdi)
+        mov     %r15, 0x08(%rdi)
+        mov     %r14, 0x10(%rdi)
+        mov     %r13, 0x18(%rdi)
+        mov     %r12, 0x20(%rdi)
+        mov     %rbx, 0x28(%rdi)
+        mov     %rbp, 0x30(%rdi)
+
+        mov     0x00(%rsi), %rsp
+        mov     0x08(%rsi), %r15
+        mov     0x10(%rsi), %r14
+        mov     0x18(%rsi), %r13
+        mov     0x20(%rsi), %r12
+        mov     0x28(%rsi), %rbx
+        mov     0x30(%rsi), %rbp
         "
-    :
-    :"r"(old), "r"(new)
-    :
-    : "volatile", "alignstack"
     );
 }
 fn main() {
