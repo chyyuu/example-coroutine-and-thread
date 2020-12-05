@@ -109,9 +109,9 @@ impl Runtime {
             let new: *const ThreadContext = &self.threads[pos].ctx;
             llvm_asm!(
                 "mov $0, %rdi
-                 mov $1, %rsi
-                 call switch" ::"r"(old), "r"(new)
+                 mov $1, %rsi"::"r"(old), "r"(new)
             );
+            switch();
         }
         self.threads.len() > 0
     }
@@ -154,7 +154,6 @@ pub fn yield_thread() {
 }
 
 #[naked]
-#[no_mangle]
 #[inline(never)]
 unsafe fn switch() {
     llvm_asm!("
