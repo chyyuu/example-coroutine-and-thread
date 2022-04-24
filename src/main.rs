@@ -1,4 +1,7 @@
-#![feature(llvm_asm, naked_functions)]
+#![feature(naked_functions)]
+#![feature(asm)]
+
+use std::arch::asm;
 
 const DEFAULT_STACK_SIZE: usize = 1024 * 1024 * 2;
 const MAX_THREADS: usize = 4;
@@ -84,6 +87,7 @@ impl Runtime {
         }
     }
 
+    #[inline(never)]
     fn t_yield(&mut self) -> bool {
         let mut pos = self.current;
         while self.threads[pos].state != State::Ready {
@@ -107,11 +111,7 @@ impl Runtime {
         unsafe {
             let old: *mut ThreadContext = &mut self.threads[old_pos].ctx;
             let new: *const ThreadContext = &self.threads[pos].ctx;
-            llvm_asm!(
-                "mov $0, %rdi
-                 mov $1, %rsi"::"r"(old), "r"(new)
-            );
-            switch();
+            asm!("call switch", in("rdi") old, in("rsi") new, clobber_abi("C"));
         }
         self.threads.len() > 0
     }
@@ -137,7 +137,9 @@ impl Runtime {
 }
 
 #[naked]
-fn skip() { }
+unsafe extern "C" fn skip() {
+    asm!("ret", options(noreturn))
+}
 
 fn guard() {
     unsafe {
@@ -154,35 +156,34 @@ pub fn yield_thread() {
 }
 
 #[naked]
-#[inline(never)]
-unsafe fn switch() {
-    llvm_asm!("
-        mov     %rsp, 0x00(%rdi)
-        mov     %r15, 0x08(%rdi)
-        mov     %r14, 0x10(%rdi)
-        mov     %r13, 0x18(%rdi)
-        mov     %r12, 0x20(%rdi)
-        mov     %rbx, 0x28(%rdi)
-        mov     %rbp, 0x30(%rdi)
-
-        mov     0x00(%rsi), %rsp
-        mov     0x08(%rsi), %r15
-        mov     0x10(%rsi), %r14
-        mov     0x18(%rsi), %r13
-        mov     0x20(%rsi), %r12
-        mov     0x28(%rsi), %rbx
-        mov     0x30(%rsi), %rbp
-        "
+#[no_mangle]
+unsafe extern "C" fn switch() {
+    asm!(
+        "mov [rdi + 0x00], rsp",
+        "mov [rdi + 0x08], r15",
+        "mov [rdi + 0x10], r14",
+        "mov [rdi + 0x18], r13",
+        "mov [rdi + 0x20], r12",
+        "mov [rdi + 0x28], rbx",
+        "mov [rdi + 0x30], rbp",
+        "mov rsp, [rsi + 0x00]",
+        "mov r15, [rsi + 0x08]",
+        "mov r14, [rsi + 0x10]",
+        "mov r13, [rsi + 0x18]",
+        "mov r12, [rsi + 0x20]",
+        "mov rbx, [rsi + 0x28]",
+        "mov rbp, [rsi + 0x30]",
+        "ret", options(noreturn)
     );
 }
-fn main() {
+pub fn main() {
     let mut runtime = Runtime::new();
     runtime.init();
     runtime.spawn(|| {
         println!("THREAD 1 STARTING");
         let id = 1;
         for i in 0..10 {
-            println!("thread: {} counter: {}", id, i);
+            println!("thread: {} counter: {}", id, i);
             yield_thread();
         }
         println!("THREAD 1 FINISHED");
@@ -191,7 +192,7 @@ fn main() {
         println!("THREAD 2 STARTING");
         let id = 2;
         for i in 0..15 {
-            println!("thread: {} counter: {}", id, i);
+            println!("thread: {} counter: {}", id, i);
             yield_thread();
         }
         println!("THREAD 2 FINISHED");
