@@ -12,9 +12,9 @@ def fetch(session, url):
         print(response.json()['uuid'])
 
 
-@timer(1, 2)
+@timer(1, 1)
 def main():
     with ThreadPoolExecutor(max_workers=100) as executor:
         with requests.Session() as session:
-            executor.map(fetch, [session] * 1000, [URL] * 1000)
+            executor.map(fetch, [session] * 100, [URL] * 100)
             executor.shutdown(wait=True)

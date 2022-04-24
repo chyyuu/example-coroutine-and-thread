@@ -15,11 +15,11 @@ async def fetch(session, url):
 
 async def main():
     async with aiohttp.ClientSession() as session:
-        tasks = [fetch(session, URL) for _ in range(1000)]
+        tasks = [fetch(session, URL) for _ in range(100)]
         await asyncio.gather(*tasks)
 
 
-@timer(1, 2)
+@timer(1, 1)
 def func():
     uvloop.install()
     asyncio.run(main())

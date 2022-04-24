@@ -12,8 +12,8 @@ def fetch(session, url):
         print(response.json()['uuid'])
 
 
-@timer(1, 2)
+@timer(1, 1)
 def main():
     with Pool() as pool:
         with requests.Session() as session:
-            pool.starmap(fetch, [(session, URL) for _ in range(1000)])
+            pool.starmap(fetch, [(session, URL) for _ in range(100)])

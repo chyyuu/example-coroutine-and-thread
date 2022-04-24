@@ -19,6 +19,6 @@ async def main():
         await asyncio.gather(*tasks)
 
 
-@timer(1, 5)
+@timer(1, 1)
 def func():
     asyncio.run(main())
